@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=77.0.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dspy-lm-auth"
+version = "0.1.0"
+description = "Pi-style LM authentication helpers for DSPy"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Maxime Rivest" }]
+keywords = ["dspy", "auth", "oauth", "chatgpt", "codex", "litellm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "dspy>=3.1.0",
+    "requests>=2.31.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/MaximeRivest/dspy-lm-auth"
+Repository = "https://github.com/MaximeRivest/dspy-lm-auth"
+Issues = "https://github.com/MaximeRivest/dspy-lm-auth/issues"
+Changelog = "https://github.com/MaximeRivest/dspy-lm-auth/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2.2",
+    "pytest>=8.0.0",
+    "ruff>=0.8.0",
+    "twine>=6.1.0",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["dspy_lm_auth", "dspy_lm_auth.*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "N", "RUF", "Q"]
+ignore = [
+    "E501",
+    "B904",
+    "B027",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
