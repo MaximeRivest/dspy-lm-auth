@@ -145,6 +145,29 @@ def test_codex_forward_moves_system_messages_into_instructions(monkeypatch, tmp_
     ]
 
 
+def test_codex_route_does_not_use_openai_api_key_env(monkeypatch, tmp_path):
+    storage = make_auth_storage(tmp_path, account_id="acct_env")
+    captured = {}
+    env_sentinel = "ENV_SENTINEL_SHOULD_NOT_BE_USED"
+
+    monkeypatch.setenv("OPENAI_API_KEY", env_sentinel)
+
+    def fake_responses(*args, **kwargs):
+        captured.update(kwargs)
+        return FakeResponsesStream(make_fake_responses_response("No env leak"))
+
+    monkeypatch.setattr(dspy_lm_auth_lm.litellm, "responses", fake_responses)
+
+    lm = dspy_lm_auth.LM("codex/gpt-5.4", auth_storage=storage, cache=False)
+    output = lm("hello")
+
+    assert output == [{"text": "No env leak"}]
+    assert captured["api_key"] == storage.get_api_key("openai-codex")
+    assert captured["api_key"] != env_sentinel
+    assert lm.kwargs["api_key"] == storage.get_api_key("openai-codex")
+    assert lm.kwargs["api_key"] != env_sentinel
+
+
 def test_install_monkeypatches_dspy_lm(tmp_path):
     storage = make_auth_storage(tmp_path, account_id="acct_install")
     original_lm = dspy.LM

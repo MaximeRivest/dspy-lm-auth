@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- add README instructions for running a small self-hosted GPU model with vLLM and Qwen 3.5
+- update the GEPA example to point at a remote OpenAI-compatible GPU endpoint
+- keep the regression test proving the Codex route does not use `OPENAI_API_KEY`
+
 ## 0.1.1
 
 - add MIT license

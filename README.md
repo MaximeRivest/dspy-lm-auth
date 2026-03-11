@@ -123,11 +123,138 @@ dspy.configure(lm=local_lm, adapter=dspy.JSONAdapter())
 ```output:exec-1773240681407-w56n4
 ```
 
+## A faster self-hosted GPU stack: uv + vLLM + Qwen 3.5 + DSPy
+
+If you have a desktop, gaming PC, or another Linux box with an NVIDIA GPU, this is the easiest next step up from the laptop `llama-cpp` setup.
+
+The idea is:
+
+- run a small model yourself with `vLLM`
+- point DSPy at that OpenAI-compatible endpoint
+- keep using your Codex subscription as the stronger GEPA reflection model
+
+### 1. SSH into the GPU box
+
+```bash
+ssh YOUR_GPU_BOX
+```
+
+### 2. Install `uv` and create a clean vLLM environment
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+
+uv python install 3.12
+uv venv ~/.venvs/vllm-qwen35-08b --python 3.12
+uv pip install --python ~/.venvs/vllm-qwen35-08b/bin/python vllm
+```
+
+### 3. Launch Qwen 3.5 on the GPU with vLLM
+
+This starts an OpenAI-compatible server on port `8000` and exposes the model under the name `local-model`.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 ~/.venvs/vllm-qwen35-08b/bin/vllm serve Qwen/Qwen3.5-0.8B \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --served-model-name local-model \
+  --dtype float16 \
+  --gpu-memory-utilization 0.25 \
+  --max-model-len 2048
+```
+
+Those flags are deliberately conservative, so they are a good starting point on a busy 24 GB card like a 3090.
+
+If the GPU box is mostly free, you can usually increase one or both of:
+
+- `--gpu-memory-utilization` to something like `0.5` or `0.7`
+- `--max-model-len` to `4096`
+
+### 4. If the server is on another machine, open the port
+
+If you use `ufw`:
+
+```bash
+sudo ufw allow 8000/tcp
+```
+
+### 5. Test that the server is alive
+
+From your laptop:
+
+```bash
+curl http://YOUR_GPU_BOX:8000/v1/models
+```
+
+You should see `local-model` in the response.
+
+### 6. Use it from DSPy
+
+```python
+import dspy
+
+student_lm = dspy.LM(
+    "openai/local-model",
+    api_base="http://YOUR_GPU_BOX:8000/v1",
+    api_key="",
+    model_type="chat",
+)
+
+dspy.configure(lm=student_lm, adapter=dspy.JSONAdapter())
+```
+
+### Optional: run it as a background service with systemd
+
+If you do not want to keep a terminal open on the GPU box, you can make it a user service:
+
+```bash
+mkdir -p ~/services/vllm-qwen35-08b ~/.config/systemd/user
+
+cat > ~/services/vllm-qwen35-08b/start.sh <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+export CUDA_VISIBLE_DEVICES=0
+exec ~/.venvs/vllm-qwen35-08b/bin/vllm serve Qwen/Qwen3.5-0.8B \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --served-model-name local-model \
+  --dtype float16 \
+  --gpu-memory-utilization 0.25 \
+  --max-model-len 2048
+SH
+chmod +x ~/services/vllm-qwen35-08b/start.sh
+
+cat > ~/.config/systemd/user/vllm-qwen35-08b.service <<'UNIT'
+[Unit]
+Description=vLLM OpenAI server for Qwen3.5-0.8B
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/services/vllm-qwen35-08b
+ExecStart=%h/services/vllm-qwen35-08b/start.sh
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
+UNIT
+
+systemctl --user daemon-reload
+systemctl --user enable --now vllm-qwen35-08b.service
+systemctl --user status vllm-qwen35-08b.service --no-pager
+```
+
+That gives you a simple self-hosted setup that a non-expert can copy, paste, and run.
+
 ## Tiny GEPA demo: optimize a French→English translator
 
 This is a small self-contained demo that:
 
-- uses a local `llama-cpp` server running Baguettotron as the **student model**
+- uses a self-hosted `vLLM` server running Qwen 3.5 as the **student model**
 - uses your ChatGPT Codex subscription via `dspy-lm-auth` as the **GEPA reflection model**
 - optimizes a tiny translator on just **10 French→English examples**
 
@@ -158,10 +285,10 @@ from dspy_template_adapter import TemplateAdapter, Predict
 # Patch dspy.LM so `codex/...` works.
 dspy_lm_auth.install()
 
-# Student model: local llama-cpp server.
+# Student model: self-hosted vLLM server on your GPU box.
 student_lm = dspy.LM(
     "openai/local-model",
-    api_base="http://192.168.2.24:8000/v1",
+    api_base="http://YOUR_GPU_BOX:8000/v1",  # e.g. http://192.168.2.24:8000/v1
     api_key="",
     model_type="chat",
 )
@@ -231,7 +358,7 @@ Out[39]:
 
 
 ```python
-# Requires the local llama-cpp server above to be running.
+# Requires the self-hosted vLLM server above to be running.
 translator(french="ceci est vert")
 ```
 
@@ -242,7 +369,7 @@ Prediction(
 )
 ```
 
-This call should work once the local `llama-cpp` server is running.
+This call should work once the self-hosted `vLLM` server is running.
 
 
 ```py
