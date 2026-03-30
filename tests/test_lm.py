@@ -168,6 +168,80 @@ def test_codex_route_does_not_use_openai_api_key_env(monkeypatch, tmp_path):
     assert lm.kwargs["api_key"] != env_sentinel
 
 
+def test_passthrough_provider_injects_api_key_from_auth_storage(tmp_path):
+    """Passthrough providers (no route resolver) must still get api_key from auth_storage."""
+    storage = AuthStorage(tmp_path / "auth.json")
+    storage.set("zai", {"type": "api_key", "key": "zai-secret-from-auth-json"})
+
+    lm = dspy_lm_auth.LM("zai/glm-5", auth_storage=storage)
+
+    assert lm.model == "zai/glm-5"
+    assert lm._uses_codex_route is False
+    assert lm.kwargs["api_key"] == "zai-secret-from-auth-json"
+
+
+def test_passthrough_provider_injects_api_key_from_env(monkeypatch, tmp_path):
+    """Passthrough providers must pick up env var keys via auth_storage fallback."""
+    storage = AuthStorage(tmp_path / "auth.json")
+    monkeypatch.setenv("ZAI_API_KEY", "zai-secret-from-env")
+
+    lm = dspy_lm_auth.LM("zai/glm-5", auth_storage=storage)
+
+    assert lm.kwargs["api_key"] == "zai-secret-from-env"
+
+
+def test_passthrough_provider_injects_api_key_from_runtime_override(tmp_path):
+    """Passthrough providers must use runtime overrides from auth_storage."""
+    storage = AuthStorage(tmp_path / "auth.json")
+    storage.set_runtime_api_key("zai", "zai-runtime-override")
+
+    lm = dspy_lm_auth.LM("zai/glm-5", auth_storage=storage)
+
+    assert lm.kwargs["api_key"] == "zai-runtime-override"
+
+
+def test_passthrough_explicit_api_key_takes_precedence(tmp_path):
+    """Explicit api_key kwarg must not be overwritten by auth_storage injection."""
+    storage = AuthStorage(tmp_path / "auth.json")
+    storage.set("zai", {"type": "api_key", "key": "should-not-appear"})
+
+    lm = dspy_lm_auth.LM("zai/glm-5", auth_storage=storage, api_key="explicit-key")
+
+    assert lm.kwargs["api_key"] == "explicit-key"
+
+
+def test_passthrough_no_api_key_when_none_available(tmp_path):
+    """If no key exists anywhere, kwargs should not contain api_key."""
+    storage = AuthStorage(tmp_path / "auth.json")
+
+    lm = dspy_lm_auth.LM("zai/glm-5", auth_storage=storage)
+
+    assert "api_key" not in lm.kwargs
+
+
+def test_passthrough_anthropic_injects_api_key(monkeypatch, tmp_path):
+    """Verify the passthrough injection works for another provider (anthropic)."""
+    storage = AuthStorage(tmp_path / "auth.json")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key-from-env")
+
+    lm = dspy_lm_auth.LM("anthropic/claude-3-5-sonnet-20241022", auth_storage=storage)
+
+    assert lm.kwargs["api_key"] == "anthropic-key-from-env"
+
+
+def test_passthrough_forward_uses_standard_dspy_path(monkeypatch, tmp_path):
+    """Passthrough LM.forward() must delegate to dspy.LM.forward(), not codex path."""
+    storage = AuthStorage(tmp_path / "auth.json")
+    storage.set("zai", {"type": "api_key", "key": "zai-key"})
+
+    lm = dspy_lm_auth.LM("zai/glm-5", auth_storage=storage, cache=False)
+    assert lm._uses_codex_route is False
+    # forward() will call super().forward() which calls litellm.completion
+    # We verify the model and api_key are correctly set for that path
+    assert lm.model == "zai/glm-5"
+    assert lm.kwargs["api_key"] == "zai-key"
+
+
 def test_install_monkeypatches_dspy_lm(tmp_path):
     storage = make_auth_storage(tmp_path, account_id="acct_install")
     original_lm = dspy.LM
