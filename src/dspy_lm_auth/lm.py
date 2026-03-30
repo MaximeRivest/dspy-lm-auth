@@ -132,6 +132,11 @@ def resolve_lm_route(
         resolver = _ROUTE_RESOLVERS[model]
 
     if resolver is None:
+        if "api_key" not in resolved_kwargs:
+            provider_prefix = model.split("/", 1)[0]
+            api_key = auth_storage.get_api_key(provider_prefix)
+            if api_key:
+                resolved_kwargs["api_key"] = api_key
         return model, resolved_kwargs
     return resolver(model, resolved_kwargs, auth_storage)
 
