@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 import dspy
@@ -292,32 +293,61 @@ def _build_codex_responses_request(request: dict[str, Any]) -> dict[str, Any]:
     return request
 
 
+def _coerce_output_item_for_dspy(output_item: Any) -> Any:
+    output_item_type = getattr(output_item.type, "value", output_item.type)
+    if output_item_type == "function_call":
+        return output_item
+    if output_item_type != "message":
+        return None
+
+    content = [SimpleNamespace(**item) if isinstance(item, dict) else item for item in output_item.content]
+    return SimpleNamespace(type=output_item_type, content=content)
+
+
+def _stream_output_item(event: Any) -> Any:
+    if getattr(event.type, "value", event.type) != "response.output_item.done":
+        return None
+    return _coerce_output_item_for_dspy(event.item)
+
+
+def _attach_stream_output_items(completed_response: Any, output_items: list[Any]) -> Any:
+    if output_items and not completed_response.output:
+        completed_response.__dict__["output"] = output_items
+    return completed_response
+
+
 def _consume_codex_response_stream(response_stream: Any) -> Any:
     if not hasattr(response_stream, "completed_response"):
         return response_stream
 
-    for _ in response_stream:
-        pass
+    output_items = []
+    for event in response_stream:
+        output_item = _stream_output_item(event)
+        if output_item is not None:
+            output_items.append(output_item)
 
     completed_event = getattr(response_stream, "completed_response", None)
     completed_response = getattr(completed_event, "response", None)
     if completed_response is None:
         raise RuntimeError("Codex response stream ended without a completed response")
-    return completed_response
+    return _attach_stream_output_items(completed_response, output_items)
 
 
 async def _aconsume_codex_response_stream(response_stream: Any) -> Any:
     if not hasattr(response_stream, "completed_response"):
         return response_stream
 
-    async for _ in response_stream:
-        pass
+    output_items = []
+    async for event in response_stream:
+        output_item = _stream_output_item(event)
+        if output_item is not None:
+            output_items.append(output_item)
 
     completed_event = getattr(response_stream, "completed_response", None)
     completed_response = getattr(completed_event, "response", None)
     if completed_response is None:
         raise RuntimeError("Codex response stream ended without a completed response")
-    return completed_response
+    return _attach_stream_output_items(completed_response, output_items)
 
 
 def _litellm_codex_responses_completion(

@@ -4,6 +4,13 @@ import time
 from types import SimpleNamespace
 
 import dspy
+from litellm.types.llms.base import BaseLiteLLMOpenAIResponseObject
+from litellm.types.llms.openai import (
+    OutputItemDoneEvent,
+    ResponseAPIUsage,
+    ResponseCompletedEvent,
+    ResponsesAPIResponse,
+)
 
 import dspy_lm_auth
 import dspy_lm_auth.lm as dspy_lm_auth_lm
@@ -51,11 +58,30 @@ def make_fake_responses_response(text: str = "Hello!"):
 
 
 class FakeResponsesStream:
-    def __init__(self, response):
-        self.completed_response = SimpleNamespace(response=response)
+    def __init__(self, response, events=None, completed_response=None):
+        self.completed_response = completed_response or SimpleNamespace(response=response)
+        self.events = events or []
 
     def __iter__(self):
-        return iter(())
+        return iter(self.events)
+
+
+def make_empty_completed_response_stream(output_item):
+    response = ResponsesAPIResponse(
+        id="resp_test",
+        created_at=0,
+        model="gpt-5.4",
+        output=[],
+        usage=ResponseAPIUsage(input_tokens=0, output_tokens=0, total_tokens=0),
+    )
+    event = OutputItemDoneEvent(
+        type="response.output_item.done",
+        output_index=0,
+        sequence_number=1,
+        item=BaseLiteLLMOpenAIResponseObject(**output_item),
+    )
+    completed_response = ResponseCompletedEvent(type="response.completed", response=response)
+    return FakeResponsesStream(response, events=[event], completed_response=completed_response)
 
 
 def test_codex_alias_resolves_to_openai_responses_config(tmp_path):
@@ -103,6 +129,94 @@ def test_codex_forward_supplies_required_streaming_request(monkeypatch, tmp_path
         {
             "role": "user",
             "content": [{"type": "input_text", "text": "hello"}],
+        }
+    ]
+
+
+def test_codex_forward_preserves_streamed_output_when_completed_response_is_empty(monkeypatch, tmp_path):
+    storage = make_auth_storage(tmp_path, account_id="acct_stream")
+
+    def fake_responses(*args, **kwargs):
+        return make_empty_completed_response_stream(
+            {
+                "id": "msg_test",
+                "type": "message",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "Hello from stream"}],
+                "role": "assistant",
+            }
+        )
+
+    monkeypatch.setattr(dspy_lm_auth_lm.litellm, "responses", fake_responses)
+
+    lm = dspy_lm_auth.LM("codex/gpt-5.4", auth_storage=storage, cache=False)
+    output = lm("hello")
+
+    assert output == [{"text": "Hello from stream"}]
+
+
+def test_installed_codex_lm_returns_streamed_text_when_completed_response_is_empty(monkeypatch, tmp_path):
+    storage = make_auth_storage(tmp_path, account_id="acct_installed_stream")
+    original_lm = dspy.LM
+    previous_configured_lm = dspy.settings.lm
+
+    def fake_responses(*args, **kwargs):
+        return make_empty_completed_response_stream(
+            {
+                "id": "msg_test",
+                "type": "message",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "Hello from installed stream"}],
+                "role": "assistant",
+            }
+        )
+
+    monkeypatch.setattr(dspy_lm_auth_lm.litellm, "responses", fake_responses)
+
+    try:
+        dspy_lm_auth.install(auth_storage=storage)
+        lm = dspy.LM("codex/gpt-5.4", cache=False)
+        dspy.configure(lm=lm)
+
+        assert lm("hello")[0]["text"] == "Hello from installed stream"
+    finally:
+        dspy.configure(lm=previous_configured_lm)
+        dspy_lm_auth.uninstall()
+        assert dspy.LM is original_lm
+
+
+def test_codex_forward_preserves_streamed_function_call_when_completed_response_is_empty(monkeypatch, tmp_path):
+    storage = make_auth_storage(tmp_path, account_id="acct_stream_tool")
+
+    def fake_responses(*args, **kwargs):
+        return make_empty_completed_response_stream(
+            {
+                "id": "fc_test",
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "lookup",
+                "arguments": '{"query":"hello"}',
+                "status": "completed",
+            }
+        )
+
+    monkeypatch.setattr(dspy_lm_auth_lm.litellm, "responses", fake_responses)
+
+    lm = dspy_lm_auth.LM("codex/gpt-5.4", auth_storage=storage, cache=False)
+    output = lm("hello")
+
+    assert output == [
+        {
+            "tool_calls": [
+                {
+                    "id": "fc_test",
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "lookup",
+                    "arguments": '{"query":"hello"}',
+                    "status": "completed",
+                }
+            ]
         }
     ]
 
