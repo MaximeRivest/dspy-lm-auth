@@ -159,7 +159,7 @@ def test_codex_forward_moves_system_messages_into_instructions(monkeypatch, tmp_
         },
         {
             "role": "assistant",
-            "content": [{"type": "input_text", "text": "Hi."}],
+            "content": [{"type": "output_text", "text": "Hi."}],
         },
         {
             "role": "user",
