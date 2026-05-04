@@ -2,7 +2,15 @@ import base64
 import json
 import time
 
-from dspy_lm_auth.auth import AuthStorage, extract_chatgpt_account_id, register_oauth_provider, resolve_config_value
+from dspy_lm_auth.auth import (
+    AuthStorage,
+    extract_chatgpt_account_id,
+    get_oauth_provider,
+    is_openai_codex_provider,
+    normalize_provider_id,
+    register_oauth_provider,
+    resolve_config_value,
+)
 
 
 def _b64url(data: dict) -> str:
@@ -24,6 +32,30 @@ def test_resolve_config_value_prefers_environment_variable(monkeypatch):
 def test_extract_chatgpt_account_id_reads_jwt_claim():
     token = make_fake_jwt("acct_123")
     assert extract_chatgpt_account_id(token) == "acct_123"
+
+
+def test_codex_provider_suffixes_normalize_to_distinct_storage_keys():
+    assert normalize_provider_id("codex-2") == "openai-codex-2"
+    assert normalize_provider_id("chatgpt-work") == "openai-codex-work"
+    assert is_openai_codex_provider("openai-codex-2")
+    assert get_oauth_provider("openai-codex-2") is get_oauth_provider("openai-codex")
+
+
+def test_auth_storage_resolves_suffixed_codex_oauth_credentials(tmp_path):
+    auth_path = tmp_path / "auth.json"
+    storage = AuthStorage(auth_path)
+    storage.set(
+        "openai-codex-2",
+        {
+            "type": "oauth",
+            "access": make_fake_jwt("acct_second"),
+            "refresh": "refresh-token",
+            "expires": int(time.time() * 1000) + 60_000,
+            "accountId": "acct_second",
+        },
+    )
+
+    assert storage.get_api_key("codex-2") == make_fake_jwt("acct_second")
 
 
 def test_auth_storage_resolves_api_key_credentials(monkeypatch, tmp_path):

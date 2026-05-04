@@ -122,7 +122,18 @@ def _locked_json_file(path: Path):
 
 
 def normalize_provider_id(provider: str) -> str:
-    return _AUTH_PROVIDER_ALIASES.get(provider, provider)
+    aliased = _AUTH_PROVIDER_ALIASES.get(provider)
+    if aliased is not None:
+        return aliased
+    for prefix in ("codex-", "chatgpt-"):
+        if provider.startswith(prefix) and len(provider) > len(prefix):
+            return f"{OPENAI_CODEX_PROVIDER}-{provider[len(prefix):]}"
+    return provider
+
+
+def is_openai_codex_provider(provider: str) -> bool:
+    provider = normalize_provider_id(provider)
+    return provider == OPENAI_CODEX_PROVIDER or provider.startswith(f"{OPENAI_CODEX_PROVIDER}-")
 
 
 def clear_command_cache() -> None:
@@ -326,7 +337,11 @@ def register_oauth_provider(provider: OAuthProvider) -> None:
 
 
 def get_oauth_provider(provider: str) -> OAuthProvider | None:
-    return _OAUTH_PROVIDERS.get(normalize_provider_id(provider))
+    provider = normalize_provider_id(provider)
+    oauth_provider = _OAUTH_PROVIDERS.get(provider)
+    if oauth_provider is None and is_openai_codex_provider(provider):
+        return _OAUTH_PROVIDERS.get(OPENAI_CODEX_PROVIDER)
+    return oauth_provider
 
 
 def get_default_auth_storage(path: str | os.PathLike[str] | None = None) -> AuthStorage:
@@ -611,6 +626,7 @@ __all__ = [
     "get_default_auth_storage",
     "get_oauth_provider",
     "getauthtoken",
+    "is_openai_codex_provider",
     "login",
     "login_openai_codex",
     "logout",
