@@ -58,6 +58,57 @@ def test_auth_storage_resolves_suffixed_codex_oauth_credentials(tmp_path):
     assert storage.get_api_key("codex-2") == make_fake_jwt("acct_second")
 
 
+def test_auth_storage_refreshes_suffixed_codex_oauth_credentials(tmp_path):
+    auth_path = tmp_path / "auth.json"
+    storage = AuthStorage(auth_path)
+    refreshed_token = make_fake_jwt("acct_refreshed_second")
+    original_provider = get_oauth_provider("openai-codex")
+
+    class TestCodexOAuthProvider:
+        id = "openai-codex"
+        name = "Test Codex OAuth"
+
+        def login(self, **kwargs):
+            raise NotImplementedError
+
+        def refresh_token(self, credentials):
+            assert credentials["refresh"] == "refresh-second"
+            return {
+                "type": "oauth",
+                "access": refreshed_token,
+                "refresh": "refresh-second-2",
+                "expires": int(time.time() * 1000) + 60_000,
+                "accountId": "acct_refreshed_second",
+            }
+
+        def get_api_key(self, credentials):
+            return credentials["access"]
+
+    try:
+        register_oauth_provider(TestCodexOAuthProvider())
+        storage.set(
+            "openai-codex-2",
+            {
+                "type": "oauth",
+                "access": make_fake_jwt("acct_old_second"),
+                "refresh": "refresh-second",
+                "expires": int(time.time() * 1000) - 1_000,
+                "accountId": "acct_old_second",
+            },
+        )
+
+        token = storage.get_api_key("codex-2")
+    finally:
+        if original_provider is not None:
+            register_oauth_provider(original_provider)
+
+    assert token == refreshed_token
+    persisted = json.loads(auth_path.read_text())
+    assert persisted["openai-codex-2"]["access"] == refreshed_token
+    assert persisted["openai-codex-2"]["refresh"] == "refresh-second-2"
+    assert "openai-codex" not in persisted
+
+
 def test_auth_storage_resolves_api_key_credentials(monkeypatch, tmp_path):
     auth_path = tmp_path / "auth.json"
     storage = AuthStorage(auth_path)

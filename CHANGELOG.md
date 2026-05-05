@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- add selectable Codex credential keys such as `openai-codex-2`, `codex-2`, and `chatgpt-2` so multiple ChatGPT/Codex accounts can share one Pi auth file
+- keep suffixed Codex keys on the existing Codex OAuth provider and Responses route while selecting the token/account header from the requested credential key
+- encode assistant messages as `output_text` for the Codex Responses API
+
 ## 0.1.3
 
 - rewrite the README as a more polished end-to-end tutorial
