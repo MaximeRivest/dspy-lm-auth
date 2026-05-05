@@ -14,6 +14,7 @@ from dspy_lm_auth.auth import (
     extract_chatgpt_account_id,
     get_default_auth_storage,
     getauthtoken,
+    is_openai_codex_provider,
     normalize_provider_id,
     set_default_auth_storage,
 )
@@ -73,21 +74,30 @@ def codex_headers(
     return headers
 
 
-def _resolve_codex_route(model: str, kwargs: dict[str, Any], auth_storage: AuthStorage) -> tuple[str, dict[str, Any]]:
+def _resolve_codex_route_for_provider(
+    model: str,
+    kwargs: dict[str, Any],
+    auth_storage: AuthStorage,
+    credential_provider: str,
+) -> tuple[str, dict[str, Any]]:
     if "/" in model:
         _, model_id = model.split("/", 1)
     else:
         model_id = DEFAULT_CODEX_MODEL
 
+    credential_provider = normalize_provider_id(credential_provider)
     resolved_kwargs = dict(kwargs)
-    token = resolved_kwargs.get("api_key") or auth_storage.get_api_key(OPENAI_CODEX_PROVIDER)
+    token = resolved_kwargs.get("api_key") or auth_storage.get_api_key(
+        credential_provider
+    )
     if not token:
         raise ValueError(
-            "No OpenAI Codex credential found. Run `dspy_lm_auth.login('openai-codex')`, "
-            "reuse Pi's auth.json, or pass `api_key=` explicitly."
+            f"No OpenAI Codex credential found for {credential_provider!r}. "
+            f"Run `dspy_lm_auth.login({credential_provider!r})`, reuse Pi's auth.json, "
+            "or pass `api_key=` explicitly."
         )
 
-    credential = auth_storage.get(OPENAI_CODEX_PROVIDER)
+    credential = auth_storage.get(credential_provider)
     account_id = resolved_kwargs.pop("chatgpt_account_id", None)
     if account_id is None and isinstance(credential, dict):
         raw_account_id = credential.get("accountId")
@@ -110,6 +120,14 @@ def _resolve_codex_route(model: str, kwargs: dict[str, Any], auth_storage: AuthS
     return f"openai/{model_id}", resolved_kwargs
 
 
+def _resolve_codex_route(
+    model: str, kwargs: dict[str, Any], auth_storage: AuthStorage
+) -> tuple[str, dict[str, Any]]:
+    return _resolve_codex_route_for_provider(
+        model, kwargs, auth_storage, OPENAI_CODEX_PROVIDER
+    )
+
+
 def resolve_lm_route(
     model: str,
     *,
@@ -122,16 +140,26 @@ def resolve_lm_route(
     if auth_provider:
         provider = normalize_provider_id(auth_provider)
         resolver = _ROUTE_RESOLVERS.get(provider)
-        if resolver is None:
-            raise ValueError(f"No DSPy LM auth route registered for auth_provider={auth_provider!r}")
-        return resolver(model, resolved_kwargs, auth_storage)
+        if resolver is not None:
+            return resolver(model, resolved_kwargs, auth_storage)
+        if is_openai_codex_provider(provider):
+            return _resolve_codex_route_for_provider(
+                model, resolved_kwargs, auth_storage, provider
+            )
+        raise ValueError(
+            f"No DSPy LM auth route registered for auth_provider={auth_provider!r}"
+        )
 
-    alias = model.split("/", 1)[0]
+    alias = normalize_provider_id(model.split("/", 1)[0])
     resolver = _ROUTE_RESOLVERS.get(alias)
     if resolver is None and model in _ROUTE_RESOLVERS:
         resolver = _ROUTE_RESOLVERS[model]
 
     if resolver is None:
+        if is_openai_codex_provider(alias):
+            return _resolve_codex_route_for_provider(
+                model, resolved_kwargs, auth_storage, alias
+            )
         return model, resolved_kwargs
     return resolver(model, resolved_kwargs, auth_storage)
 
@@ -174,8 +202,23 @@ def _stringify_message_content(content: Any) -> str:
     return str(content)
 
 
-def _convert_content_item_to_responses_format(item: dict[str, Any]) -> dict[str, Any]:
+def _convert_content_item_to_responses_format(
+    item: dict[str, Any], *, role: str
+) -> dict[str, Any]:
     item_type = item.get("type")
+    if role == "assistant":
+        if item_type == "refusal":
+            return {
+                "type": "refusal",
+                "refusal": item.get("refusal", item.get("text", "")),
+            }
+        if item_type in {"text", "input_text", "output_text"}:
+            return {
+                "type": "output_text",
+                "text": item.get("text", ""),
+            }
+        return {"type": "output_text", "text": _stringify_message_content([item])}
+
     if item_type == "image_url":
         image_url = item.get("image_url", {})
         if isinstance(image_url, dict):
@@ -184,7 +227,7 @@ def _convert_content_item_to_responses_format(item: dict[str, Any]) -> dict[str,
             "type": "input_image",
             "image_url": image_url,
         }
-    if item_type in {"text", "input_text"}:
+    if item_type in {"text", "input_text", "output_text"}:
         return {
             "type": "input_text",
             "text": item.get("text", ""),
@@ -200,20 +243,25 @@ def _convert_content_item_to_responses_format(item: dict[str, Any]) -> dict[str,
     return item
 
 
-def _convert_message_content_to_responses_format(content: Any) -> list[dict[str, Any]]:
+def _convert_message_content_to_responses_format(
+    content: Any, *, role: str
+) -> list[dict[str, Any]]:
+    text_type = "output_text" if role == "assistant" else "input_text"
     if isinstance(content, str):
-        return [{"type": "input_text", "text": content}]
+        return [{"type": text_type, "text": content}]
     if isinstance(content, list):
         blocks: list[dict[str, Any]] = []
         for item in content:
             if isinstance(item, dict):
-                blocks.append(_convert_content_item_to_responses_format(item))
+                blocks.append(
+                    _convert_content_item_to_responses_format(item, role=role)
+                )
             elif item is not None:
-                blocks.append({"type": "input_text", "text": str(item)})
+                blocks.append({"type": text_type, "text": str(item)})
         return blocks
     if content is None:
         return []
-    return [{"type": "input_text", "text": str(content)}]
+    return [{"type": text_type, "text": str(content)}]
 
 
 def _coerce_response_format(response_format: Any) -> Any:
@@ -261,7 +309,7 @@ def _build_codex_responses_request(request: dict[str, Any]) -> dict[str, Any]:
         input_messages.append(
             {
                 "role": role,
-                "content": _convert_message_content_to_responses_format(content),
+                "content": _convert_message_content_to_responses_format(content, role=role),
             }
         )
 
@@ -384,10 +432,14 @@ class LM(_DSPY_LM):
         self.original_model_string = model
         self.auth_provider = auth_provider
         self.resolved_model_string = resolved_model
-        requested_route = normalize_provider_id(auth_provider) if auth_provider else normalize_provider_id(model.split("/", 1)[0])
-        self._uses_codex_route = (
-            requested_route == OPENAI_CODEX_PROVIDER or resolved_kwargs.get("api_base") == DEFAULT_CODEX_API_BASE
+        requested_route = (
+            normalize_provider_id(auth_provider)
+            if auth_provider
+            else normalize_provider_id(model.split("/", 1)[0])
         )
+        self._uses_codex_route = is_openai_codex_provider(
+            requested_route
+        ) or resolved_kwargs.get("api_base") == DEFAULT_CODEX_API_BASE
         super().__init__(resolved_model, *args, **resolved_kwargs)
 
     def forward(

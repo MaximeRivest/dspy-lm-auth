@@ -2,7 +2,15 @@ import base64
 import json
 import time
 
-from dspy_lm_auth.auth import AuthStorage, extract_chatgpt_account_id, register_oauth_provider, resolve_config_value
+from dspy_lm_auth.auth import (
+    AuthStorage,
+    extract_chatgpt_account_id,
+    get_oauth_provider,
+    is_openai_codex_provider,
+    normalize_provider_id,
+    register_oauth_provider,
+    resolve_config_value,
+)
 
 
 def _b64url(data: dict) -> str:
@@ -24,6 +32,135 @@ def test_resolve_config_value_prefers_environment_variable(monkeypatch):
 def test_extract_chatgpt_account_id_reads_jwt_claim():
     token = make_fake_jwt("acct_123")
     assert extract_chatgpt_account_id(token) == "acct_123"
+
+
+def test_codex_provider_suffixes_normalize_to_distinct_storage_keys():
+    assert normalize_provider_id("codex-2") == "openai-codex-2"
+    assert normalize_provider_id("chatgpt-work") == "openai-codex-work"
+    assert is_openai_codex_provider("openai-codex-2")
+    assert get_oauth_provider("openai-codex-2") is get_oauth_provider("openai-codex")
+
+
+def test_auth_storage_resolves_suffixed_codex_oauth_credentials(tmp_path):
+    auth_path = tmp_path / "auth.json"
+    storage = AuthStorage(auth_path)
+    storage.set(
+        "openai-codex-2",
+        {
+            "type": "oauth",
+            "access": make_fake_jwt("acct_second"),
+            "refresh": "refresh-token",
+            "expires": int(time.time() * 1000) + 60_000,
+            "accountId": "acct_second",
+        },
+    )
+
+    assert storage.get_api_key("codex-2") == make_fake_jwt("acct_second")
+
+
+def test_auth_storage_login_and_logout_target_suffixed_codex_key(tmp_path):
+    auth_path = tmp_path / "auth.json"
+    storage = AuthStorage(auth_path)
+    login_token = make_fake_jwt("acct_login_second")
+    original_token = make_fake_jwt("acct_original")
+    original_provider = get_oauth_provider("openai-codex")
+
+    class TestCodexOAuthProvider:
+        id = "openai-codex"
+        name = "Test Codex OAuth"
+
+        def login(self, **kwargs):
+            assert kwargs == {"open_browser": False}
+            return {
+                "access": login_token,
+                "refresh": "refresh-login-second",
+                "expires": int(time.time() * 1000) + 60_000,
+                "accountId": "acct_login_second",
+            }
+
+        def refresh_token(self, credentials):
+            raise NotImplementedError
+
+        def get_api_key(self, credentials):
+            return credentials["access"]
+
+    try:
+        register_oauth_provider(TestCodexOAuthProvider())
+        storage.set(
+            "openai-codex",
+            {
+                "type": "oauth",
+                "access": original_token,
+                "refresh": "refresh-original",
+                "expires": int(time.time() * 1000) + 60_000,
+                "accountId": "acct_original",
+            },
+        )
+
+        credential = storage.login("codex-2", open_browser=False)
+        persisted_after_login = json.loads(auth_path.read_text())
+        storage.logout("codex-2")
+        persisted_after_logout = json.loads(auth_path.read_text())
+    finally:
+        if original_provider is not None:
+            register_oauth_provider(original_provider)
+
+    assert credential["access"] == login_token
+    assert persisted_after_login["openai-codex"]["access"] == original_token
+    assert persisted_after_login["openai-codex-2"]["access"] == login_token
+    assert "openai-codex-2" not in persisted_after_logout
+    assert persisted_after_logout["openai-codex"]["access"] == original_token
+
+
+def test_auth_storage_refreshes_suffixed_codex_oauth_credentials(tmp_path):
+    auth_path = tmp_path / "auth.json"
+    storage = AuthStorage(auth_path)
+    refreshed_token = make_fake_jwt("acct_refreshed_second")
+    original_provider = get_oauth_provider("openai-codex")
+
+    class TestCodexOAuthProvider:
+        id = "openai-codex"
+        name = "Test Codex OAuth"
+
+        def login(self, **kwargs):
+            raise NotImplementedError
+
+        def refresh_token(self, credentials):
+            assert credentials["refresh"] == "refresh-second"
+            return {
+                "type": "oauth",
+                "access": refreshed_token,
+                "refresh": "refresh-second-2",
+                "expires": int(time.time() * 1000) + 60_000,
+                "accountId": "acct_refreshed_second",
+            }
+
+        def get_api_key(self, credentials):
+            return credentials["access"]
+
+    try:
+        register_oauth_provider(TestCodexOAuthProvider())
+        storage.set(
+            "openai-codex-2",
+            {
+                "type": "oauth",
+                "access": make_fake_jwt("acct_old_second"),
+                "refresh": "refresh-second",
+                "expires": int(time.time() * 1000) - 1_000,
+                "accountId": "acct_old_second",
+            },
+        )
+
+        token = storage.get_api_key("codex-2")
+    finally:
+        if original_provider is not None:
+            register_oauth_provider(original_provider)
+
+    assert token == refreshed_token
+    persisted = json.loads(auth_path.read_text())
+    assert persisted["openai-codex-2"]["access"] == refreshed_token
+    assert persisted["openai-codex-2"]["refresh"] == "refresh-second-2"
+    assert "openai-codex" not in persisted
 
 
 def test_auth_storage_resolves_api_key_credentials(monkeypatch, tmp_path):

@@ -22,10 +22,10 @@ def make_fake_jwt(account_id: str = "acct_test") -> str:
     return f"{header}.{payload}.signature"
 
 
-def make_auth_storage(tmp_path, account_id: str = "acct_test") -> AuthStorage:
+def make_auth_storage(tmp_path, account_id: str = "acct_test", provider: str = "openai-codex") -> AuthStorage:
     storage = AuthStorage(tmp_path / "auth.json")
     storage.set(
-        "openai-codex",
+        provider,
         {
             "type": "oauth",
             "access": make_fake_jwt(account_id),
@@ -82,6 +82,29 @@ def test_auth_provider_can_apply_codex_route_to_openai_model(tmp_path):
     assert lm.kwargs["headers"]["chatgpt-account-id"] == "acct_explicit"
 
 
+def test_suffixed_codex_auth_provider_uses_matching_storage_key(tmp_path):
+    storage = make_auth_storage(tmp_path, account_id="acct_second", provider="openai-codex-2")
+
+    lm = dspy_lm_auth.LM("openai/gpt-5.4", auth_provider="openai-codex-2", auth_storage=storage)
+
+    assert lm.model == "openai/gpt-5.4"
+    assert lm.model_type == "responses"
+    assert lm.kwargs["api_key"] == storage.get_api_key("openai-codex-2")
+    assert lm.kwargs["headers"]["chatgpt-account-id"] == "acct_second"
+
+
+def test_suffixed_codex_model_alias_selects_matching_storage_key(tmp_path):
+    storage = make_auth_storage(tmp_path, account_id="acct_alias", provider="openai-codex-work")
+
+    lm = dspy_lm_auth.LM("codex-work/gpt-5.4", auth_storage=storage)
+
+    assert lm.original_model_string == "codex-work/gpt-5.4"
+    assert lm.model == "openai/gpt-5.4"
+    assert lm.model_type == "responses"
+    assert lm.kwargs["api_key"] == storage.get_api_key("openai-codex-work")
+    assert lm.kwargs["headers"]["chatgpt-account-id"] == "acct_alias"
+
+
 def test_codex_forward_supplies_required_streaming_request(monkeypatch, tmp_path):
     storage = make_auth_storage(tmp_path, account_id="acct_forward")
     captured = {}
@@ -136,7 +159,7 @@ def test_codex_forward_moves_system_messages_into_instructions(monkeypatch, tmp_
         },
         {
             "role": "assistant",
-            "content": [{"type": "input_text", "text": "Hi."}],
+            "content": [{"type": "output_text", "text": "Hi."}],
         },
         {
             "role": "user",

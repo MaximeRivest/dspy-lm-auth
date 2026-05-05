@@ -60,6 +60,32 @@ dspy_lm_auth.login("codex")
 
 That starts the OAuth flow and stores the resulting credentials in Pi's auth file.
 
+## Multiple Codex accounts
+
+Pi auth files can contain multiple Codex credentials, for example `openai-codex` and `openai-codex-2`.
+These suffixed names are credential-storage keys, not separate model providers: they all reuse the same Codex
+OAuth flow and Codex Responses route, but read the token and `chatgpt-account-id` from the selected key.
+Select a specific credential key with `auth_provider`:
+
+```python
+lm = dspy_lm_auth.LM("openai/gpt-5.4", auth_provider="openai-codex-2")
+```
+
+The short aliases `codex-2` and `chatgpt-2` normalize to `openai-codex-2`, so this is equivalent:
+
+```python
+lm = dspy_lm_auth.LM("codex-2/gpt-5.4")
+```
+
+Use this when one ChatGPT/Codex account is quota-limited or when you intentionally keep work and personal
+Codex subscriptions separate in the same Pi auth file.
+
+You can also login directly into a suffixed storage key:
+
+```python
+dspy_lm_auth.login("openai-codex-2")
+```
+
 ## Tutorial: local DSPy + subscription-powered GEPA
 
 ### Step 1: run a small local model with Ollama
