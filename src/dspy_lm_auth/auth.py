@@ -133,7 +133,9 @@ def normalize_provider_id(provider: str) -> str:
 
 def is_openai_codex_provider(provider: str) -> bool:
     provider = normalize_provider_id(provider)
-    return provider == OPENAI_CODEX_PROVIDER or provider.startswith(f"{OPENAI_CODEX_PROVIDER}-")
+    return provider == OPENAI_CODEX_PROVIDER or provider.startswith(
+        f"{OPENAI_CODEX_PROVIDER}-"
+    )
 
 
 def clear_command_cache() -> None:

@@ -87,7 +87,9 @@ def _resolve_codex_route_for_provider(
 
     credential_provider = normalize_provider_id(credential_provider)
     resolved_kwargs = dict(kwargs)
-    token = resolved_kwargs.get("api_key") or auth_storage.get_api_key(credential_provider)
+    token = resolved_kwargs.get("api_key") or auth_storage.get_api_key(
+        credential_provider
+    )
     if not token:
         raise ValueError(
             f"No OpenAI Codex credential found for {credential_provider!r}. "
@@ -118,8 +120,12 @@ def _resolve_codex_route_for_provider(
     return f"openai/{model_id}", resolved_kwargs
 
 
-def _resolve_codex_route(model: str, kwargs: dict[str, Any], auth_storage: AuthStorage) -> tuple[str, dict[str, Any]]:
-    return _resolve_codex_route_for_provider(model, kwargs, auth_storage, OPENAI_CODEX_PROVIDER)
+def _resolve_codex_route(
+    model: str, kwargs: dict[str, Any], auth_storage: AuthStorage
+) -> tuple[str, dict[str, Any]]:
+    return _resolve_codex_route_for_provider(
+        model, kwargs, auth_storage, OPENAI_CODEX_PROVIDER
+    )
 
 
 def resolve_lm_route(
@@ -137,8 +143,12 @@ def resolve_lm_route(
         if resolver is not None:
             return resolver(model, resolved_kwargs, auth_storage)
         if is_openai_codex_provider(provider):
-            return _resolve_codex_route_for_provider(model, resolved_kwargs, auth_storage, provider)
-        raise ValueError(f"No DSPy LM auth route registered for auth_provider={auth_provider!r}")
+            return _resolve_codex_route_for_provider(
+                model, resolved_kwargs, auth_storage, provider
+            )
+        raise ValueError(
+            f"No DSPy LM auth route registered for auth_provider={auth_provider!r}"
+        )
 
     alias = normalize_provider_id(model.split("/", 1)[0])
     resolver = _ROUTE_RESOLVERS.get(alias)
@@ -147,7 +157,9 @@ def resolve_lm_route(
 
     if resolver is None:
         if is_openai_codex_provider(alias):
-            return _resolve_codex_route_for_provider(model, resolved_kwargs, auth_storage, alias)
+            return _resolve_codex_route_for_provider(
+                model, resolved_kwargs, auth_storage, alias
+            )
         return model, resolved_kwargs
     return resolver(model, resolved_kwargs, auth_storage)
 
@@ -190,7 +202,9 @@ def _stringify_message_content(content: Any) -> str:
     return str(content)
 
 
-def _convert_content_item_to_responses_format(item: dict[str, Any], *, role: str) -> dict[str, Any]:
+def _convert_content_item_to_responses_format(
+    item: dict[str, Any], *, role: str
+) -> dict[str, Any]:
     item_type = item.get("type")
     if role == "assistant":
         if item_type == "refusal":
@@ -229,7 +243,9 @@ def _convert_content_item_to_responses_format(item: dict[str, Any], *, role: str
     return item
 
 
-def _convert_message_content_to_responses_format(content: Any, *, role: str) -> list[dict[str, Any]]:
+def _convert_message_content_to_responses_format(
+    content: Any, *, role: str
+) -> list[dict[str, Any]]:
     text_type = "output_text" if role == "assistant" else "input_text"
     if isinstance(content, str):
         return [{"type": text_type, "text": content}]
@@ -237,7 +253,9 @@ def _convert_message_content_to_responses_format(content: Any, *, role: str) -> 
         blocks: list[dict[str, Any]] = []
         for item in content:
             if isinstance(item, dict):
-                blocks.append(_convert_content_item_to_responses_format(item, role=role))
+                blocks.append(
+                    _convert_content_item_to_responses_format(item, role=role)
+                )
             elif item is not None:
                 blocks.append({"type": text_type, "text": str(item)})
         return blocks
@@ -414,8 +432,14 @@ class LM(_DSPY_LM):
         self.original_model_string = model
         self.auth_provider = auth_provider
         self.resolved_model_string = resolved_model
-        requested_route = normalize_provider_id(auth_provider) if auth_provider else normalize_provider_id(model.split("/", 1)[0])
-        self._uses_codex_route = is_openai_codex_provider(requested_route) or resolved_kwargs.get("api_base") == DEFAULT_CODEX_API_BASE
+        requested_route = (
+            normalize_provider_id(auth_provider)
+            if auth_provider
+            else normalize_provider_id(model.split("/", 1)[0])
+        )
+        self._uses_codex_route = is_openai_codex_provider(
+            requested_route
+        ) or resolved_kwargs.get("api_base") == DEFAULT_CODEX_API_BASE
         super().__init__(resolved_model, *args, **resolved_kwargs)
 
     def forward(
