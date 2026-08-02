@@ -17,6 +17,11 @@ from dspy_lm_auth.auth import (
     normalize_provider_id,
     set_default_auth_storage,
 )
+from dspy_lm_auth.codex_stream import (
+    _aconsume_codex_response_stream,
+    _consume_codex_response_stream,
+    _patch_litellm_stream_logging,
+)
 
 DEFAULT_CODEX_MODEL = "gpt-5.4"
 DEFAULT_CODEX_API_BASE = "https://chatgpt.com/backend-api/codex"
@@ -292,34 +297,6 @@ def _build_codex_responses_request(request: dict[str, Any]) -> dict[str, Any]:
     return request
 
 
-def _consume_codex_response_stream(response_stream: Any) -> Any:
-    if not hasattr(response_stream, "completed_response"):
-        return response_stream
-
-    for _ in response_stream:
-        pass
-
-    completed_event = getattr(response_stream, "completed_response", None)
-    completed_response = getattr(completed_event, "response", None)
-    if completed_response is None:
-        raise RuntimeError("Codex response stream ended without a completed response")
-    return completed_response
-
-
-async def _aconsume_codex_response_stream(response_stream: Any) -> Any:
-    if not hasattr(response_stream, "completed_response"):
-        return response_stream
-
-    async for _ in response_stream:
-        pass
-
-    completed_event = getattr(response_stream, "completed_response", None)
-    completed_response = getattr(completed_event, "response", None)
-    if completed_response is None:
-        raise RuntimeError("Codex response stream ended without a completed response")
-    return completed_response
-
-
 def _litellm_codex_responses_completion(
     request: dict[str, Any],
     num_retries: int,
@@ -338,6 +315,7 @@ def _litellm_codex_responses_completion(
         headers=_add_dspy_identifier_to_headers(headers),
         **request,
     )
+    response_stream = _patch_litellm_stream_logging(response_stream)
     return _consume_codex_response_stream(response_stream)
 
 
@@ -359,6 +337,7 @@ async def _alitellm_codex_responses_completion(
         headers=_add_dspy_identifier_to_headers(headers),
         **request,
     )
+    response_stream = _patch_litellm_stream_logging(response_stream)
     return await _aconsume_codex_response_stream(response_stream)
 
 
@@ -384,7 +363,9 @@ class LM(_DSPY_LM):
         self.original_model_string = model
         self.auth_provider = auth_provider
         self.resolved_model_string = resolved_model
-        requested_route = normalize_provider_id(auth_provider) if auth_provider else normalize_provider_id(model.split("/", 1)[0])
+        requested_route = (
+            normalize_provider_id(auth_provider) if auth_provider else normalize_provider_id(model.split("/", 1)[0])
+        )
         self._uses_codex_route = (
             requested_route == OPENAI_CODEX_PROVIDER or resolved_kwargs.get("api_base") == DEFAULT_CODEX_API_BASE
         )

@@ -20,6 +20,7 @@ from dspy_lm_auth.auth import (
     resolve_config_value,
     set_default_auth_storage,
 )
+from dspy_lm_auth.codex_stream import get_stream_metadata
 from dspy_lm_auth.lm import (
     DEFAULT_CODEX_API_BASE,
     DEFAULT_CODEX_INSTRUCTIONS,
@@ -53,6 +54,7 @@ __all__ = [
     "extract_chatgpt_account_id",
     "get_default_auth_storage",
     "get_oauth_provider",
+    "get_stream_metadata",
     "getauthtoken",
     "install",
     "login",
