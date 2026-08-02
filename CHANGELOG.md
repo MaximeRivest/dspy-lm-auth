@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4
+
+- adopt `tryingET/dspy-lm-auth` as the maintained canonical fork while preserving upstream attribution and MIT licensing
+- preserve typed Codex Responses channels so only `response.output_text.delta` contributes answer text
+- reconstruct omitted completed-response output only under bounded, ambiguity-rejecting stream-index conditions
+- keep reasoning, refusal, tool, failure, and lifecycle channels separate with content-free transport metadata
+- normalize mapping and Pydantic response shapes for DSPy 3, including tool-call preservation and synchronous/asynchronous parity
+
 ## 0.1.3
 
 - rewrite the README as a more polished end-to-end tutorial

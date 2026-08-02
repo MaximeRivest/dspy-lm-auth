@@ -1,10 +1,12 @@
 # dspy-lm-auth
 
-[![CI](https://github.com/MaximeRivest/dspy-lm-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/MaximeRivest/dspy-lm-auth/actions/workflows/ci.yml) [![PyPI version](https://img.shields.io/pypi/v/dspy-lm-auth.svg)](https://pypi.org/project/dspy-lm-auth/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/MaximeRivest/dspy-lm-auth/blob/main/LICENSE)
+[![CI](https://github.com/tryingET/dspy-lm-auth/actions/workflows/ci.yml/badge.svg)](https://github.com/tryingET/dspy-lm-auth/actions/workflows/ci.yml) [![PyPI version](https://img.shields.io/pypi/v/dspy-lm-auth.svg)](https://pypi.org/project/dspy-lm-auth/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/tryingET/dspy-lm-auth/blob/main/LICENSE)
 
 Pi-style LM authentication helpers for DSPy.
 
 `dspy-lm-auth` lets DSPy reuse Pi credentials from `~/.pi/agent/auth.json`, including ChatGPT Codex subscription auth.
+
+This repository is the maintained `tryingET/dspy-lm-auth` fork. It preserves Maxime Rivest's original authorship and MIT license while carrying forward compatibility, typed-stream, and release maintenance.
 
 The nicest way to use it is not as an isolated auth helper, but as the missing piece in a very practical DSPy workflow:
 

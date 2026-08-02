@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dspy-lm-auth"
-version = "0.1.3"
+version = "0.1.4"
 description = "Pi-style LM authentication helpers for DSPy"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,10 +29,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/MaximeRivest/dspy-lm-auth"
-Repository = "https://github.com/MaximeRivest/dspy-lm-auth"
-Issues = "https://github.com/MaximeRivest/dspy-lm-auth/issues"
-Changelog = "https://github.com/MaximeRivest/dspy-lm-auth/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/tryingET/dspy-lm-auth"
+Repository = "https://github.com/tryingET/dspy-lm-auth"
+Issues = "https://github.com/tryingET/dspy-lm-auth/issues"
+Changelog = "https://github.com/tryingET/dspy-lm-auth/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
