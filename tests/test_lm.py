@@ -383,6 +383,7 @@ def test_codex_stream_normalizes_empty_completion_with_only_reasoning_gap():
                     {
                         "type": "response.reasoning_summary_text.delta",
                         "delta": "private",
+                        "output_index": 0,
                     },
                     {
                         "type": "response.output_text.delta",
@@ -424,6 +425,32 @@ def test_codex_stream_normalizes_empty_completion_with_only_reasoning_gap():
 
     with pytest.raises(RuntimeError, match="absent from empty completion"):
         dspy_lm_auth_lm._consume_codex_response_stream(ToolStream())
+
+    class UnboundedGapStream(Stream):
+        def __init__(self, output_index: int):
+            self.output_index = output_index
+
+        def __iter__(self):
+            return iter(
+                [
+                    {
+                        "type": "response.reasoning_summary_text.delta",
+                        "delta": "private",
+                        "output_index": 0,
+                    },
+                    {
+                        "type": "response.output_text.delta",
+                        "delta": "answer",
+                        "output_index": self.output_index,
+                        "content_index": 0,
+                        "item_id": "msg-streamed",
+                    },
+                ]
+            )
+
+    for unexplained_index in (2, 65, 999_999):
+        with pytest.raises(RuntimeError, match="absent from empty completion"):
+            dspy_lm_auth_lm._consume_codex_response_stream(UnboundedGapStream(unexplained_index))
 
 
 def test_codex_stream_rejects_ambiguous_typed_text_fallback():

@@ -9,6 +9,7 @@ from typing import Any
 import litellm
 
 _OutputLocation = tuple[int | None, int | None, str | None]
+_MAX_RECONSTRUCTED_OUTPUT_INDEX = 64
 
 
 def _event_field(event: Any, name: str) -> Any:
@@ -165,6 +166,7 @@ def _event_bucket(event_type: str, event: Any) -> str:
 class _CodexStreamAccumulator:
     text_parts: list[str] = field(default_factory=list)
     output_locations: set[_OutputLocation | None] = field(default_factory=set)
+    reasoning_output_indices: set[int] = field(default_factory=set)
     event_counts: dict[str, int] = field(default_factory=dict)
     failures: list[str] = field(default_factory=list)
     refusal_seen: bool = False
@@ -174,6 +176,14 @@ class _CodexStreamAccumulator:
         event_type = event_type if isinstance(event_type, str) else ""
         bucket = _event_bucket(event_type, event)
         self.event_counts[bucket] = self.event_counts.get(bucket, 0) + 1
+        event_output_index = _event_field(event, "output_index")
+        if (
+            bucket == "reasoning"
+            and isinstance(event_output_index, int)
+            and not isinstance(event_output_index, bool)
+            and event_output_index >= 0
+        ):
+            self.reasoning_output_indices.add(event_output_index)
         if event_type == "response.output_text.delta":
             delta = _event_field(event, "delta")
             if isinstance(delta, str):
@@ -201,7 +211,12 @@ class _CodexStreamAccumulator:
 
     def finish(
         self,
-    ) -> tuple[str, dict[str, int], set[_OutputLocation | None]]:
+    ) -> tuple[
+        str,
+        dict[str, int],
+        set[_OutputLocation | None],
+        set[int],
+    ]:
         if self.failures:
             raise RuntimeError("Codex response stream ended with error: " + "; ".join(self.failures))
         if self.refusal_seen:
@@ -210,6 +225,7 @@ class _CodexStreamAccumulator:
             "".join(self.text_parts),
             dict(sorted(self.event_counts.items())),
             set(self.output_locations),
+            set(self.reasoning_output_indices),
         )
 
 
@@ -296,6 +312,7 @@ def _apply_typed_stream_output(
     text: str,
     output_locations: set[_OutputLocation | None],
     event_counts: Mapping[str, int],
+    reasoning_output_indices: set[int],
 ) -> None:
     raw_output = getattr(adapted, "output", None)
     output = _adapt_response_value(_plain_value(raw_output))
@@ -341,8 +358,13 @@ def _apply_typed_stream_output(
         else:
             raise RuntimeError("Codex typed output stream location was ambiguous")
     elif isinstance(stream_output_index, int) and isinstance(stream_content_index, int):
-        missing_nonanswer_items_only = not output and all(
-            event_counts.get(bucket, 0) == 0 for bucket in ("failure", "refusal", "tool", "unknown")
+        reasoning_gap_is_bound = stream_output_index <= _MAX_RECONSTRUCTED_OUTPUT_INDEX and all(
+            index in reasoning_output_indices for index in range(stream_output_index)
+        )
+        missing_nonanswer_items_only = (
+            not output
+            and reasoning_gap_is_bound
+            and all(event_counts.get(bucket, 0) == 0 for bucket in ("failure", "refusal", "tool", "unknown"))
         )
         if stream_content_index == 0 and (stream_output_index == len(output) or missing_nonanswer_items_only):
             output_index, content_index = append_empty_target()
@@ -384,6 +406,7 @@ def _finalize_codex_stream(
     text: str,
     event_counts: dict[str, int],
     output_locations: set[_OutputLocation | None],
+    reasoning_output_indices: set[int],
 ) -> _ResponseObject:
     completed_event = getattr(response_stream, "completed_response", None)
     completed_response = getattr(completed_event, "response", None)
@@ -395,7 +418,13 @@ def _finalize_codex_stream(
         output_text = completed_text
         output_text_source = "completed_response"
     elif text:
-        _apply_typed_stream_output(adapted, text, output_locations, event_counts)
+        _apply_typed_stream_output(
+            adapted,
+            text,
+            output_locations,
+            event_counts,
+            reasoning_output_indices,
+        )
         output_text = text
         output_text_source = "typed_stream"
     else:
@@ -464,8 +493,14 @@ def _consume_codex_response_stream(response_stream: Any) -> _ResponseObject:
     accumulator = _CodexStreamAccumulator()
     for event in response_stream:
         accumulator.add(event)
-    text, event_counts, output_locations = accumulator.finish()
-    return _finalize_codex_stream(response_stream, text, event_counts, output_locations)
+    text, event_counts, output_locations, reasoning_indices = accumulator.finish()
+    return _finalize_codex_stream(
+        response_stream,
+        text,
+        event_counts,
+        output_locations,
+        reasoning_indices,
+    )
 
 
 async def _aconsume_codex_response_stream(response_stream: Any) -> _ResponseObject:
@@ -474,5 +509,11 @@ async def _aconsume_codex_response_stream(response_stream: Any) -> _ResponseObje
     accumulator = _CodexStreamAccumulator()
     async for event in response_stream:
         accumulator.add(event)
-    text, event_counts, output_locations = accumulator.finish()
-    return _finalize_codex_stream(response_stream, text, event_counts, output_locations)
+    text, event_counts, output_locations, reasoning_indices = accumulator.finish()
+    return _finalize_codex_stream(
+        response_stream,
+        text,
+        event_counts,
+        output_locations,
+        reasoning_indices,
+    )
